@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 )
+
+var wg sync.WaitGroup
 
 var (
 	Green  = "\033[32m"
@@ -65,6 +68,16 @@ func forkEvent(e Event) string {
 	return res
 }
 
+func worker(id int, eventsCh <-chan Event, resultsCh chan<- string, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for e := range eventsCh {
+		message := eventFormatter(e)
+		if message != "" {
+			resultsCh <- message
+		}
+	}
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Pls Enter Username")
@@ -104,11 +117,29 @@ func main() {
 		return
 	}
 
-	for _, e := range events {
-		message := eventFormatter(e)
-		if message == "" {
-			continue
-		}
-		fmt.Println("-", message)
+	eventsCh := make(chan Event)
+	resultsCh := make(chan string, len(events))
+	// fmt.Println("Total events from API:", len(events))
+
+	numWorkers := 4
+
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go worker(i+1, eventsCh, resultsCh, &wg)
+	}
+	//Transfering data from struct to channel
+	for _, data := range events {
+		eventsCh <- data
+	}
+	close(eventsCh)
+
+	//Closing result channel seperately via goroutine
+	go func() {
+		wg.Wait()
+		close(resultsCh)
+	}()
+
+	for msg := range resultsCh {
+		fmt.Println("-", msg)
 	}
 }
